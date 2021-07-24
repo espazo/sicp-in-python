@@ -1,0 +1,179 @@
+分布式系统
+========
+
+C/S 系统
+-------
+服务里的压力很大
+
+P2P 系统
+-------
+减轻服务器的压力
+
+模块化
+-----
+相同的接口
+
+消息传递
+------
+消息协议是一系列规则
+
+万维网上的消息
+-----------
+例如 HTTP
+
+
+并行计算
+======
+
+当一个处理器在做一些计算的一个切面时，其它的可以在另一个切面工作。
+所有的处理器都可以共享相同的数据，但工作并行执行。
+
+共享状态的问题
+-----------
+
+# 变量的读写顺序相当重要
+def make_withdraw(balance):
+    def withdraw(amount):
+        nonlocal balance
+        if amount > balance:
+            print('Insufficient funds')
+        else:
+            balance = balance - amount
+            print(balance)
+    return withdraw
+
+
+并行计算的正确性
+-------------
+
+并行计算环境中的正确性有两个标准。
+1，结果应该总是相同。
+2，结果应该和串行的结果一致。
+
+序列化意味着同一时间只运行一个进程，这一瞬间就好像串行执行一样。同步有两种形式。
+1，互斥，进程轮流访问一个变量。
+2，条件同步，在满足条件（例如其它进程完成了它们的任务）之前进程一直等待，之后继续执行。
+
+保护共享状态：锁和信号量
+-------------------
+
+锁
+--
+锁，也被称为互斥体（mutex），是共享对象，常用于发射共享状态被读取或修改的信号。
+不同的编程语言实现锁的方式不同，但是在 Python 中，一个进程可以调用
+acquire 来尝试获得锁的“所有权”，然后在使用完共享变量的时候调用
+release 释放它。
+
+同一时间只有一个进程可以获得一把锁。
+
+
+from threading import Lock
+def make_withdraw(balance):
+    balance_lock = Lock()
+    def withdraw(amount):
+        nonlocal balance
+        # try to acquire the lock
+        balance_lock.acquire()
+        # once successful, enter the critical section
+        if amount > balance:
+            print("Insufficient funds")
+        else:
+            balance = balance - amount
+            print(balance)
+        # upon exiting the critical section, release the lock
+        balance_lock.release()
+
+
+我们看到了，两个进程同时进入临界区是可能的。某个进程实例获取到了 balance_lock，
+另一个就得等待，知道那个进程推出了临界区，它才能开始执行。
+
+要注意程序不会自己终止，除非 P1 释放了 balance_lock。如果他没有释放 balance_lock，
+P2 永远不可能获取它，而是一直会等待。忘记了释放获得的锁是并行编程中的一个常见错误。
+
+
+信号量
+-----
+信号量是用于维持有限资源访问的信号。它们和锁类似，除了它们可以允许某个限制下的多个访问。
+它就像电梯一样只能容纳几个人。一旦达到了限制，想要使用资源的进程就必须等待。
+其它进程释放了信号量之后，它才可以获得。
+
+
+from threading import Semaphore
+db_semaphore = Semaphore(2) # set up the semaphore
+database = []
+def insert(data):
+    db_semaphore.acquire()  # try to acquire the semaphore
+    database.append(data)   # if successful, proceed
+    db_semaphore.release()  # release the semaphore
+
+
+值为 1 的信号量的行为和锁一样。
+
+
+保持同步：条件变量
+===============
+条件变量在并行计算由一系列不走组成时非常有用。
+
+条件变量
+-------
+条件变量是表现为信号的对象，信号表示某个条件被满足。
+
+
+step1_finished = 0
+start_step2 = Condition()
+
+def do_step_1(index):
+    A[index] = b[index] + C[index]
+    # access the shared state that determines the condition status
+    start_step2.acquire()
+    step1_finished += 1
+    if (step1_finished == 2):   # if the condition is met
+        start_step2.notifyAll() # send the signal
+    # release access to shared state
+    start_step2.release()
+
+
+def do_step_2(index):
+    # wait for the condition
+    start_step2.wait()
+    V[index] = M[index] . A
+
+
+死锁
+====
+虽然同步方法对保护进程状态十分有效，但它们也带来了麻烦。
+因为它们会导致一个进程等待另一个进程，这些进程就由死锁的风险。
+
+死锁的来源是循环等待。
+
+
+x_lock = Lock()
+y_lock = Lock()
+
+x = 1
+y = 0
+
+
+def compute():
+    x_lock.acquire()
+    y_lock.acquire()
+
+    y = x + y
+    x = x * x
+
+    y_lock.release()
+    x_lock.release()
+
+
+def anti_compute():
+    y_lock.acquire()
+    x_lock.acquire()
+
+    y = y - x
+    x = sqrt(x)
+
+    x_lock.release()
+    y_lock.release()
+
+
+死锁的解决办法：资源的获取顺序应当保持一致。
